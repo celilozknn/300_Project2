@@ -1,0 +1,20 @@
+# Python cache and compiled files
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# macOS system file
+.DS_Store
+
+# Pdf Description File
+CMPE_300_P1.pdf
+
+# Celil related files
+celil*.*
+
+# Ebrar related files
+ebrar*.*
+
+# Image files
+*.png
