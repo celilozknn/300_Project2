@@ -1,0 +1,14 @@
+robot
+generator
+signal
+wrench
+factory
+cable
+machine
+dust
+panel
+storage
+energy
+spark
+reboot
+system
