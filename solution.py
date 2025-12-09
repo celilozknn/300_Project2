@@ -141,6 +141,18 @@ def get_first_worker_rank(pipeline_id, pipeline_size=4):
     """
     return 1 + (pipeline_id * pipeline_size)
 
+def get_worker_pair(rank):
+    """
+    given a worker rank (starting from 1), returns its paired worker
+    pairing is 1<->2, 3<->4, 5<->6, ...
+    :param rank: worker rank
+    :return: rank of partner worker
+    """
+    if rank % 2 == 1:   # odd rank
+        return rank + 1
+    else:                # even rank
+        return rank - 1
+
 def pattern1(comm, rank, size, text_lines, vocab_set, stopwords_set):
     """
     Pattern #1: Parallel End-to-End Processing
@@ -370,9 +382,83 @@ def pattern3(comm, rank, size, text_lines, vocab_set, stopwords_set):
 
         return None, None
 
-def pattern4():
-    pass
+def pattern4(comm, rank, size, text_lines, vocab_set, stopwords_set):
+    """
+    pattern #4: end-to-end processing in worker processes with task paralellism
+    each worker does lowercase, punctuation removal, stopword removal
+    then we do tf/df splitting: odd rank -> tf, even rank -> df
+    manager collects and aggregates
+    :param comm: mpi communicator
+    :param rank: rank of processor
+    :param size: number of processors
+    :param text_lines: input text
+    :param vocab_set: vocabulary set
+    :param stopwords_set: stopwords set
+    :return: final_tf, final_df (only for manager)
+    """
 
+    manager_rank = 0
+    num_workers = size - 1  # exclude manager
+
+    if rank == manager_rank:   # manager process
+        # send config info to all processes except the manager process
+        for r in range(1, size):
+            comm.send((vocab_set, stopwords_set), dest=r)
+
+        # split data into balanced chunks for workers
+        chunks = split_into_chunks(text_lines, num_workers)
+        
+        # send each chunk to each worker
+        for i, chunk in enumerate(chunks):
+            comm.send(chunk, dest=i+1)
+        
+        # collect results from all workers
+        final_tf = Counter()
+        final_df = Counter()
+        for worker_rank in range(1, size):
+            tf_part, df_part = comm.recv(source=worker_rank)
+            if tf_part:
+                final_tf.update(tf_part)
+            if df_part:
+                final_df.update(df_part)
+        return final_tf, final_df
+
+    else:   # worker process
+        # get config from manager process
+        vocab, stopwords = comm.recv(source=manager_rank)
+
+        # receive data from manager
+        data_chunk = comm.recv(source=manager_rank)
+        
+        # preprocess in each worker
+        preprocessed_data_chunk = []
+        for line in data_chunk:
+            line = line.lower() # make lowercase
+            line = "".join(c for c in line if c not in string.punctuation)  # remove punctuation
+            words = line.split() 
+            clean_words = [w for w in words if w not in stopwords] # remove stopwords
+            preprocessed_data_chunk.append(clean_words)
+
+        pair_rank = get_worker_pair(rank)
+
+        # asymmetric send/recv to avoid deadlocks
+        if rank % 2 == 1:  # odd rank sends first
+            comm.send(preprocessed_data_chunk, dest=pair_rank)
+            received_chunk = comm.recv(source=pair_rank)
+        else:  # even rank receives first
+            received_chunk = comm.recv(source=pair_rank)
+            comm.send(preprocessed_data_chunk, dest=pair_rank)
+
+        # combine own and partner's data
+        combined_chunk = preprocessed_data_chunk + received_chunk
+
+        # calculate tf or df depending on the modulo of rank, if odd: tf, if even: df
+        tf_count = compute_tf(combined_chunk, vocab_set) if rank % 2 == 1 else None
+        df_count = compute_df(combined_chunk, vocab_set) if rank % 2 == 0 else None
+
+        # send results back to manager process
+        comm.send((tf_count, df_count), dest=manager_rank)
+        return None, None
 
 if __name__ == "__main__":
     comm = MPI.COMM_WORLD
@@ -439,8 +525,8 @@ if __name__ == "__main__":
     elif pattern == 3:
         final_tf, final_df = pattern3(comm, rank, size, text_lines, vocab_set, stopwords_set)
     elif pattern == 4:
-        pass
-
+        final_tf, final_df = pattern4(comm, rank, size, text_lines, vocab_set, stopwords_set)
+    
     # Print Results
     if rank == 0:
         print("Term-Frequency (TF) Result:")
