@@ -460,7 +460,7 @@ def pattern4(comm, rank, size, text_lines, vocab_set, stopwords_set):
         comm.send((tf_count, df_count), dest=manager_rank)
         return None, None
 
-if __name__ == "__main__":
+def main():
     comm = MPI.COMM_WORLD
     rank = comm.Get_rank()
     size = comm.Get_size()
@@ -537,3 +537,7 @@ if __name__ == "__main__":
             print("\nDocument-Frequency (DF) Result:")
             for w in sorted_vocab:
                 print(f"{w}: {final_df.get(w, 0)}")
+
+if __name__ == "__main__":      
+    main()
+   
