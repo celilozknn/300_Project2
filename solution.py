@@ -257,6 +257,7 @@ if __name__ == "__main__":
                 stopwords_set.add(word)
         file_stop.close()
         pattern = args.pattern
+        
     # To strictly follow "No Collectives", we send pattern ID to everyone first.
     if rank == 0:
         for i in range(1, size):
