@@ -1,6 +1,5 @@
 # Celil Özkan 2023400324
 # Zeynep Ebrar Karadeniz 2022400030
-# TODO: add any notes relevant for grading (e.g., known issues, partial functionality).
 
 from mpi4py import MPI
 import argparse
@@ -23,15 +22,15 @@ def preprocess_sentence(sentence, stopwords):
     for char in sentence:
         if char not in string.punctuation:
             clean_sentence += char
-    # Remove stopwords
+    # Remove stopwords (commonly used words)
     words = clean_sentence.split()
     clean_words = [w for w in words if w not in stopwords]
-
     return clean_words
+
 
 def compute_tf(sentences_data, vocab_set):
     """
-    Counts number of each word in the vocab_set across all sentences combined:
+    Compute term frequency (tf): counts number of each word in the vocab_set across all sentences combined:
     :param sentences_data: list of preprocessed words lists
     :param vocab_set: list of vocab words
     :return: tf_count
@@ -43,8 +42,10 @@ def compute_tf(sentences_data, vocab_set):
                 tf_counts[w] += 1
     return tf_counts
 
+
 def compute_df(sentences_data, vocab_set):
     """
+    Compute document frequency (df):
     Counts number of distinct sentences in which each word in the vocabulary appears
     :param sentences_data: list of preprocessed words lists
     :param vocab_set: list of vocab words
@@ -59,16 +60,17 @@ def compute_df(sentences_data, vocab_set):
                 df_counts[w] += 1
     return df_counts
 
+
 def split_into_chunks(data, n_chunks):
     """
-    Splits all data into n chunks
+    Split a list into n_chunks approximately equal parts.
     :param data: input data to be divided
     :param n_chunks: number of chunks
     :return: list of chunks with n_chunks elements
     """
     total_len = len(data)
-    k = total_len // n_chunks  # k is the base size (e.g., 21 // 5 = 4)
-    m = total_len % n_chunks  # m is the remainder (e.g., 21 % 5 = 1)
+    k = total_len // n_chunks  # k is the division (21 // 5 = 4)
+    m = total_len % n_chunks  # m is the remainder (21 % 5 = 1)
 
     chunks = []
     current_index = 0
@@ -84,74 +86,80 @@ def split_into_chunks(data, n_chunks):
         current_index = end  # update current index for next chunk
     return chunks
 
+
 def get_pipeline_id(rank, pipeline_size=4):
     """
-    Given a worker rank, returns which pipeline it belongs to.
-
-    :param rank: global MPI rank (manager is rank 0)
-    :param pipeline_size: number of workers per pipeline (default 4)
-    :return: pipeline_id (0-based)
+    Find which pipeline a worker is belong to using its rank.
+    :param rank: global MPI rank (manager process have rank 0)
+    :param pipeline_size: number of workers per pipeline (default 4 for this project)
+    :return: pipeline_id (0, 1, 2, ...)
     """
     if rank == 0:
         return None  # General manager process does not have a stage
     return (rank - 1) // pipeline_size
 
+
 def get_stage_in_pipeline(rank, pipeline_size=4):
     """
-    Given a worker rank, returns the stage number within its pipeline.
-
-    :param rank: process rank (manager is rank 0)
+    Find the position in the pipeline using the rank. 
+    :param rank: process rank (manager process have rank 0)
     :param pipeline_size: number of workers per pipeline
-    :return: stage number (with possible values 1 to pipeline_size)
+    :return: stage number (1, 2, ..., pipeline_size)
     """
     if rank == 0:
-        return None  # General manager process does not have a stage
+        return None  # general manager process does not have a stage
     return ((rank - 1) % pipeline_size) + 1
+
 
 def get_pipeline_prev_next(rank, pipeline_size=4):
     """
     Returns the previous and next rank in the same pipeline for a given worker.
-
-    :param rank: process rank (manager is rank 0)
+    Used in the pattern #3 as a helper function
+    :param rank: process rank (manager process have rank 0)
     :param pipeline_size: number of workers per pipeline
-    :return: tuple (prev_rank, next_rank), None if no prev or next (each tuple element is from 1 to pipeline_size)
+    :return: tuple (prev_rank, next_rank), None if no prev or next (each tuple element is from 1,2, ..., pipeline_size)
     """
     stage = get_stage_in_pipeline(rank, pipeline_size)
     prev_rank = rank - 1 if stage > 1 else None
     next_rank = rank + 1 if stage < pipeline_size else None
     return prev_rank, next_rank
 
+
 def get_pipeline_last_worker_rank(pipeline_id, pipeline_size=4):
     """
-    Given a pipeline ID, returns the rank of the last worker in that pipeline.
+    Given a pipeline number, returns the rank of the last worker in that pipeline.
+    Again used in pattern #3 as a helper function.
 
-    :param pipeline_id: 0-based pipeline ID
+    :param pipeline_id: 0-based pipeline ID (0, 1, 2, ...)
     :param pipeline_size: number of workers per pipeline
     :return: rank of the last worker in the pipeline
     """
-    return 1 + (pipeline_id * pipeline_size) + (pipeline_size-1)
+    return 1 + (pipeline_id * pipeline_size) + (pipeline_size - 1)
+
 
 def get_first_worker_rank(pipeline_id, pipeline_size=4):
     """
-    Given a pipeline ID, returns the rank of the first worker in that pipeline.
-
-    :param pipeline_id: 0-based pipeline ID
+    Given the pipeline number, returns the rank of the first worker in that pipeline.
+    Pattern3 uses this function as a helper function.
+    :param pipeline_id: 0-based pipeline id (0, 1, 2, ...)
     :param pipeline_size: number of workers per pipeline
     :return: rank of the first worker in the pipeline
     """
     return 1 + (pipeline_id * pipeline_size)
 
+
 def get_worker_pair(rank):
     """
     given a worker rank (starting from 1), returns its paired worker
-    pairing is 1<->2, 3<->4, 5<->6, ...
+    pairing is 1 with 2, 3 with 4, 5 with 6, ... (2k - 1 with 2k)
     :param rank: worker rank
     :return: rank of partner worker
     """
-    if rank % 2 == 1:   # odd rank
+    if rank % 2 == 1:  # odd rank
         return rank + 1
-    else:                # even rank
+    else:  # even rank
         return rank - 1
+
 
 def pattern1(comm, rank, size, text_lines, vocab_set, stopwords_set):
     """
@@ -165,17 +173,17 @@ def pattern1(comm, rank, size, text_lines, vocab_set, stopwords_set):
     :param stopwords_set: commonly used words such as “the”, “is”, “to”, and “in”, which are called stopwords
     :return: tf_count (if manager aka rank=0)
     """
-    if rank == 0:  # Manager
+    if rank == 0:  # Manager task
         num_workers = size - 1
         chunks = split_into_chunks(text_lines, num_workers)
-        # Distribute
+        # Distribute the chunks to workers
         for i in range(num_workers):
             dest = i + 1
             # Send config first (manual broadcast)
             comm.send((vocab_set, stopwords_set), dest=dest)
             # Send data
             comm.send(chunks[i], dest=dest)
-        # Aggregate
+        # Aggregate the partial tf values from workers
         total_tf = Counter()
         for i in range(num_workers):
             partial_tf = comm.recv(source=i + 1)
@@ -185,16 +193,17 @@ def pattern1(comm, rank, size, text_lines, vocab_set, stopwords_set):
 
     else:
         # Worker
-        vocab, stopwords = comm.recv(source=0)
+        vocab_set, stopwords = comm.recv(source=0)
         lines = comm.recv(source=0)
 
         processed_data = []
         for line in lines:
             processed_data.append(preprocess_sentence(line, stopwords))
 
-        tf_counts = compute_tf(processed_data, vocab)
+        tf_counts = compute_tf(processed_data, vocab_set)
         comm.send(tf_counts, dest=0)
         return None, None
+
 
 def pattern2(comm, rank, size, text_lines, vocab_set, stopwords_set):
     """
@@ -208,24 +217,26 @@ def pattern2(comm, rank, size, text_lines, vocab_set, stopwords_set):
     :param stopwords_set: commonly used words such as “the”, “is”, “to”, and “in”, which are called stopwords
     :return: tf_count (if manager aka rank=0)
     """
-    if rank == 0:   # manager process
+    if rank == 0:  # manager process
         # Send config to workers
         for r in range(1, 5):
             comm.send((vocab_set, stopwords_set), dest=r)
         # Split chunks and send it to workers
         num_chunks = 10
-        chunks = split_into_chunks(text_lines,num_chunks)
+        chunks = split_into_chunks(text_lines, num_chunks)
         for chunk in chunks:
             comm.send(chunk, dest=1)
         # Send termination signal
         comm.send(None, dest=1)
+        # Receive total tf result
         final_tf = comm.recv(source=4)
         return final_tf, None
 
-    else:   # worker process
+    else:  # worker process
         # Receive Config
-        vocab, stopwords = comm.recv(source=0)
+        vocab_set, stopwords = comm.recv(source=0)
         # Initialize accumulator only for the last worker
+        # Since only the last worker computes and sends tf counts
         if rank == 4:
             acc_tf = Counter()
         else:
@@ -266,9 +277,10 @@ def pattern2(comm, rank, size, text_lines, vocab_set, stopwords_set):
                     processed_chunk.append(clean)
                 comm.send(processed_chunk, dest=4)
             elif rank == 4:  # Term Frequency (TF)
-                partial_tf = compute_tf(data, vocab)
+                partial_tf = compute_tf(data, vocab_set)
                 acc_tf.update(partial_tf)
         return None, None
+
 
 def pattern3(comm, rank, size, text_lines, vocab_set, stopwords_set):
     """
@@ -287,9 +299,8 @@ def pattern3(comm, rank, size, text_lines, vocab_set, stopwords_set):
     """
     pipeline_size = 4
     num_pipelines = (size - 1) // pipeline_size
-    manager_rank = 0
 
-    if rank == manager_rank:   # manager process
+    if rank == 0:  # manager process
         # send config info to all processes except the manager process
         for r in range(1, size):
             comm.send((vocab_set, stopwords_set), dest=r)
@@ -301,12 +312,12 @@ def pattern3(comm, rank, size, text_lines, vocab_set, stopwords_set):
         # for each pipeline, create smaller chunk and send to first worker
         for pipeline_id, large_chunk in enumerate(large_chunks):
             divisor = 10
-            num_small_chunks = len(large_chunk)//divisor
+            num_small_chunks = len(large_chunk) // divisor
             small_chunks = split_into_chunks(large_chunk, num_small_chunks)
             first_worker_rank = get_first_worker_rank(pipeline_id, pipeline_size)
             for chunk in small_chunks:
                 comm.send(chunk, dest=first_worker_rank)
-            
+
             # send none data to give the info whole data is sent
             comm.send(None, dest=first_worker_rank)
 
@@ -318,14 +329,14 @@ def pattern3(comm, rank, size, text_lines, vocab_set, stopwords_set):
 
         return final_tf, None
 
-    else:   # worker process
+    else:  # worker process
         # Receive pipeline and stage info
         pipeline_id = get_pipeline_id(rank, pipeline_size)
         stage = get_stage_in_pipeline(rank, pipeline_size)
         prev_rank, next_rank = get_pipeline_prev_next(rank, pipeline_size)
 
         # get config from manager process
-        vocab, stopwords = comm.recv(source=manager_rank)
+        vocab_set, stopwords = comm.recv(source=0)
 
         # if the worker is the last stage init a final counter for this pipeline
         if stage == pipeline_size:
@@ -338,7 +349,6 @@ def pattern3(comm, rank, size, text_lines, vocab_set, stopwords_set):
             source = prev_rank if prev_rank is not None else 0
             data = comm.recv(source=source)
 
-
             # if no data send, then we are done
             if data is None:
                 if stage < pipeline_size:
@@ -346,18 +356,18 @@ def pattern3(comm, rank, size, text_lines, vocab_set, stopwords_set):
                     comm.send(None, dest=next_rank)
                 else:
                     # if the last worker send the counter to manager
-                    comm.send(acc_tf, dest=manager_rank)
+                    comm.send(acc_tf, dest=0)
                 break
 
             # pipelining logic
             processed_chunk = []
-            
+
             if stage == 1:  # W1 lower case operation
                 for line in data:
                     processed_chunk.append(line.lower())
                 if stage < pipeline_size:
                     comm.send(processed_chunk, dest=next_rank)
-            
+
             elif stage == 2:  # W2 punctuation removal
                 for line in data:
                     clean_line = ""
@@ -367,7 +377,7 @@ def pattern3(comm, rank, size, text_lines, vocab_set, stopwords_set):
                     processed_chunk.append(clean_line)
                 if stage < pipeline_size:
                     comm.send(processed_chunk, dest=next_rank)
-            
+
             elif stage == 3:  # W3 stopword removal
                 for line in data:
                     words = line.split()
@@ -375,12 +385,13 @@ def pattern3(comm, rank, size, text_lines, vocab_set, stopwords_set):
                     processed_chunk.append(clean)
                 if stage < pipeline_size:
                     comm.send(processed_chunk, dest=next_rank)
-            
+
             elif stage == 4:  # W4 Term Frequency (TF)
-                partial_tf = compute_tf(data, vocab)
+                partial_tf = compute_tf(data, vocab_set)
                 acc_tf.update(partial_tf)
 
         return None, None
+
 
 def pattern4(comm, rank, size, text_lines, vocab_set, stopwords_set):
     """
@@ -396,22 +407,20 @@ def pattern4(comm, rank, size, text_lines, vocab_set, stopwords_set):
     :param stopwords_set: stopwords set
     :return: final_tf, final_df (only for manager)
     """
-
-    manager_rank = 0
     num_workers = size - 1  # exclude manager
 
-    if rank == manager_rank:   # manager process
+    if rank == 0:  # manager process
         # send config info to all processes except the manager process
         for r in range(1, size):
             comm.send((vocab_set, stopwords_set), dest=r)
 
         # split data into balanced chunks for workers
         chunks = split_into_chunks(text_lines, num_workers)
-        
+
         # send each chunk to each worker
         for i, chunk in enumerate(chunks):
-            comm.send(chunk, dest=i+1)
-        
+            comm.send(chunk, dest=i + 1)
+
         # collect results from all workers
         final_tf = Counter()
         final_df = Counter()
@@ -423,20 +432,20 @@ def pattern4(comm, rank, size, text_lines, vocab_set, stopwords_set):
                 final_df.update(df_part)
         return final_tf, final_df
 
-    else:   # worker process
+    else:  # worker process
         # get config from manager process
-        vocab, stopwords = comm.recv(source=manager_rank)
+        vocab_set, stopwords = comm.recv(source=0)
 
         # receive data from manager
-        data_chunk = comm.recv(source=manager_rank)
-        
+        data_chunk = comm.recv(source=0)
+
         # preprocess in each worker
         preprocessed_data_chunk = []
         for line in data_chunk:
-            line = line.lower() # make lowercase
+            line = line.lower()  # make lowercase
             line = "".join(c for c in line if c not in string.punctuation)  # remove punctuation
-            words = line.split() 
-            clean_words = [w for w in words if w not in stopwords] # remove stopwords
+            words = line.split()
+            clean_words = [w for w in words if w not in stopwords]  # remove stopwords
             preprocessed_data_chunk.append(clean_words)
 
         pair_rank = get_worker_pair(rank)
@@ -457,15 +466,14 @@ def pattern4(comm, rank, size, text_lines, vocab_set, stopwords_set):
         df_count = compute_df(combined_chunk, vocab_set) if rank % 2 == 0 else None
 
         # send results back to manager process
-        comm.send((tf_count, df_count), dest=manager_rank)
+        comm.send((tf_count, df_count), dest=0)
         return None, None
+
 
 def main():
     comm = MPI.COMM_WORLD
     rank = comm.Get_rank()
     size = comm.Get_size()
-
-    args = None
     text_lines = []
     vocab_set = set()
     stopwords_set = set()
@@ -507,7 +515,7 @@ def main():
                 stopwords_set.add(word)
         file_stop.close()
         pattern = args.pattern
-        
+
     # To strictly follow "No Collectives", we send pattern ID to everyone first.
     if rank == 0:
         for i in range(1, size):
@@ -526,7 +534,7 @@ def main():
         final_tf, final_df = pattern3(comm, rank, size, text_lines, vocab_set, stopwords_set)
     elif pattern == 4:
         final_tf, final_df = pattern4(comm, rank, size, text_lines, vocab_set, stopwords_set)
-    
+
     # Print Results
     if rank == 0:
         print("Term-Frequency (TF) Result:")
@@ -538,6 +546,6 @@ def main():
             for w in sorted_vocab:
                 print(f"{w}: {final_df.get(w, 0)}")
 
-if __name__ == "__main__":      
+
+if __name__ == "__main__":
     main()
-   

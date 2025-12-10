@@ -1,0 +1,6 @@
+best
+worst
+age
+wisdom
+foolishness
+epoch
